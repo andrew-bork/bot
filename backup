@@ -1,0 +1,233 @@
+const Discord = require("discord.js");
+const fs = require("fs");
+
+const CLIENT_SECRET = "NzUzNDQ4ODQ2MjQzMjY2NTgz.X1mV6w.e9qKu-u4Fe164f8t-f6gBbNZQ2U";
+
+var suggestions = {};
+
+const DATA_PATH = "./suggestions.json";
+
+const client = new Discord.Client();
+
+const PREFIXES = [".artemis", ".a"];
+
+client.on("ready", () => {
+
+});
+
+var ongoingPolls = {};
+
+// 🇦🇧🇨🇪🇫🇬
+
+/**
+ * 
+ * @param {[String]} args 
+ */
+function createPoll(args){
+
+    var question = "";
+    var type = "yn";
+    var time = 86400000;
+
+    const answers = [];
+
+    const isCommand = (str) => {
+        if(str === "-question"){
+            return 0;
+        }else if(str === "-answer"){
+            return 1;
+        }else if(str === "-type"){
+            return 2;
+        }else if(str === "-time"){
+            return 3;
+        }
+        return -1;
+    }
+
+    var i = 0; 
+    while(i < args.length){
+        const curr = args[i++];
+        const comm = isCommand(curr);
+        if(comm == 0){
+            while(isCommand(args[i]) == -1 && i < args.length){
+                question += args[i++] + " ";
+            }
+        }else if(comm == 1){
+            var currAnswer = "";
+            while(isCommand(args[i]) == -1 && i < args.length){
+                currAnswer += args[i++] + " ";
+            }
+            answers.push(currAnswer);
+        }else if(comm == 2){
+            const argtype = args[i++];
+            if(argtype === "yn"){
+                type = "yn";
+            }else if(argtype === "answers"){
+                type = "answers";
+            }
+        }else if(comm == 3){
+            const argtype = args[i ++];
+            time = parseInt(argtype) * 1000;
+        }
+    }
+    if(type == "yn"){
+        return {
+            question: question,
+            type: "yn",
+            time: time,
+        };
+    }
+    return {
+        question: question,
+        type: "answers",
+        answers: answers,
+        time: time,
+    }
+}
+// 🇦🇧🇨🇪🇫🇬
+function getNumber(n){
+    if(n == 0){
+        return "🇦";
+    }else if(n == 1){
+        return "🇧";
+    }else if(n == 2){
+        return "🇨";
+    }else if(n == 3){
+        return "🇪";
+    }else if(n == 4){
+        return "🇫";
+    }else if(n == 5){
+        return "🇬";
+    }
+}
+
+function sendPoll(poll){
+    if(poll.type === "yn"){
+        const pollEmbed = new Discord.MessageEmbed()
+            .setColor('#0099ff')
+            .setTitle('Poll Time!')
+            .setDescription(poll.question)
+	        .setTimestamp()
+	        .setFooter('Vote by reactions');
+        return pollEmbed;
+    }
+    const pollEmbed = new Discord.MessageEmbed()
+    .setColor('#0099ff')
+    .setTitle('Poll Time!')
+    .setDescription(poll.question)
+	.setTimestamp()
+    .setFooter('Vote by reactions');
+    
+    poll.answers.forEach(
+        (answer, i) => {
+            pollEmbed.addField(answer, `Vote ${getNumber(i)}`);
+        }
+    )
+
+    return pollEmbed;
+}
+
+function sendPollResults(poll, yes, no){
+    var yes_bar = "";
+    var no_bar = "";
+    var percent_yes = yes / (yes+no);
+    var percent_no = no / (yes+no);
+    // ⬛🟩
+
+    for(var i = 0; i < 10; i ++){
+        yes_bar += (i / 10 < percent_yes ? "🟩": "⬛");
+        no_bar += (i / 10 < percent_no ? "🟩": "⬛");
+    }
+
+    yes_bar += " -  "+Math.round(percent_yes * 100)+"%";
+    no_bar += " -  "+Math.round(percent_no * 100)+"%";
+
+    return new Discord.MessageEmbed()
+    .setColor('#0099ff')
+    .setTitle('Poll Ended!')
+    .setDescription(poll.question)
+    .addField("Yes: ", yes_bar)
+    .addField("No: ", no_bar)
+    .setTimestamp();
+}
+
+client.on("message", (message) => {
+    const msg = message.content;
+    const args = msg.split(" ");
+    const fuck = args.shift();
+    if(PREFIXES.some((val) => fuck === val)){
+        const command = args.shift();
+        if(command === "poll"){
+            const poll = createPoll(args);
+            const embed = sendPoll(poll);
+            message.channel.send(embed).then(
+                (pollmessage) => {
+                    if(poll.type === "yn"){
+                        pollmessage.react("🇾");
+                        pollmessage.react("🇳");
+
+                        const collector = pollmessage.createReactionCollector(
+                            (reaction) => {
+                                return reaction.emoji.name === "🇾" || reaction.emoji.name === "🇳";
+                            },
+                            {time: poll.time}
+                        );
+                        collector.on("end", (collected) => {
+                            const a = collected.array();
+                            const x = a[0];
+                            var yes = 0;
+                            var no = 0;
+                            if(x._emoji.name === "🇾"){
+                                yes = x.count;
+                                no = a[1].count;
+                            }else{
+                                yes = a[1].count;
+                                no = x.count;
+                            }
+
+                            const results = sendPollResults(poll, yes - 1, no - 1);
+                            message.channel.send(results);
+                        });
+                    }else if(poll.type === "answers"){
+                        const a = [];
+                        poll.answers.forEach(
+                            (answer, i) => {
+                                a.push(getNumber(i));
+                                pollmessage.react(getNumber(i));
+                            }
+                        );
+
+                        const collector = pollmessage.createReactionCollector(
+                            (reaction) => {
+                                return a.some(
+                                    (yes) => {
+                                        return yes === reaction.emoji.name;
+                                    }
+                                );
+                            },
+                            {time: poll.time}
+                        );
+                        collector.on("end", (collected) => {
+                            const a = collected.array();
+                            
+                            console.log(a);
+
+                            //const results = sendPollResults(poll, yes - 1, no - 1);
+                            //message.channel.send(results);
+                        });
+                    }
+                }
+            )
+        }
+    }
+});
+
+client.on("messageReactionRemove", (messageReaction) => {
+
+});
+
+client.on("messageReactionAdd", (messageReaction) => {
+
+});
+
+client.login(CLIENT_SECRET);
